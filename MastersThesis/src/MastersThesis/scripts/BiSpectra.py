@@ -7,14 +7,13 @@ import stingray as st
 import scipy as sc
 from stingray import AveragedPowerspectrum, AveragedCrossspectrum, EventList
 from matplotlib import cm, ticker
+from astropy.io import fits
 
 
 def split_lc(lc, segment_size, dt):
     """
     Splits a lightcurve into segments of length 'segment_size'.
     lc has to be a stingray lightcurve object
-    
-
     """
     bins_per_seg = int(segment_size/dt)  # Then number of time bins in a given segment
     n_intervals =len(lc)//bins_per_seg # Number of intervals that a light curve is split into
@@ -105,59 +104,91 @@ def get_freq_indices(xf, min_freq, max_freq):
     return min_index, max_index
 
 
-def bispec(ft, freq_index_min, freq_index_max):
+def bispec(ft, freq_index_min, freq_index_max, bicoherence=False):
     """
     ! freq_index_max is excluded from accessed indices
+
+    A, B are the two terms in the denominator of the bicoherence definition
     """
     
     # Create matrix of indices
     indices = np.arange(freq_index_min, freq_index_max, 1, dtype='int')
     indices = np.tile(indices, (len(indices), 1))
-    indices_sum = indices + indices.T
+    indices_sum = indices + indices.T + 1
+    # print((indices == 0).any())
 
     # print(indices)
     # print("Indices:", indices)
     bispec_calc = ft[indices] * ft[indices.T] * np.conjugate(ft[indices_sum])
+    
+    if bicoherence:
+        A = ft[indices] * ft[indices.T]
+        B = np.conjugate(ft[indices_sum])
+
+        return bispec_calc, A, B
+
     # print("Calculated bispectrum:", bispec_calc)
     
     return bispec_calc
 
-def avg_bispec(lc_counts_list, lc_times_list, dt=1/512):
+def avg_bispec(lc_counts_list, lc_times_list, dt=1/512, min_freq=0.01, max_freq=10, bicoherence=False):
     
+    print("HI")
     
     check = True # To define array on first iteration
     for counts in lc_counts_list:
-        # plt.plot(times, counts)
 
-        yf = sc.fft.fft(counts)
-        freq = sc.fft.fftfreq(len(counts), dt)
+        yf = sc.fft.rfft(counts)
+        freq = sc.fft.rfftfreq(len(counts), dt)
 
+        yf = yf[freq>0]
+        freq = freq[freq>0]
+        
         # print(yf.shape, xf.shape)
         
-        yf = yf[freq>0]
-        freq = freq[freq>0]        
-        # print(freq)
-        min_index, max_index = get_freq_indices(freq, min_freq=0.01, max_freq=10)
-        # print(min_index, max_index)
+        # yf = yf[freq>=0]
+        # freq = freq[freq>=0]        
+        min_index, max_index = get_freq_indices(freq, min_freq, max_freq)
 
         if check:
-            avg_bispec = bispec(yf, min_index, max_index)
+            if bicoherence:
+                avg_bispec, temp_C, temp_D = bispec(yf, min_index, max_index, bicoherence=bicoherence)
+                C = np.abs(temp_C)**2
+                D = np.abs(temp_D)**2
+            else:
+                avg_bispec = bispec(yf, min_index, max_index, bicoherence=bicoherence)
             
             check = False
+
         else:
-            avg_bispec += bispec(yf, min_index, max_index)
-            # print(avg_bispec)
+            if bicoherence:
+                temp_avg_bispec, temp_C, temp_D = bispec(yf, min_index, max_index, bicoherence=bicoherence)
+                avg_bispec += temp_avg_bispec
+                C += np.abs(temp_C)**2
+                D += np.abs(temp_D)**2
+            else:
+                avg_bispec += bispec(yf, min_index, max_index, bicoherence=bicoherence)
     
-    avg_bispec = avg_bispec / len(counts)
     freq_selected = freq[int(min_index):int(max_index)]
+
+    if bicoherence:
+        b2 = np.abs(avg_bispec)**2 / (C * D)
+        return b2, freq_selected
+    else:
+        avg_bispec = avg_bispec / len(counts)
+    
+    
+
     return avg_bispec, freq_selected
 
+
+# Wrappers Below
 
 def avg_periodogram_wrapper(data_dir, seg_size, energy_range=[3, 10], plot=True):
     """
     energy_range must be of the form [E_min, E_max]
     """
-    eventlist = st.EventList.read(data_dir, "hea") # Load eventlist from file
+    eventlist = st.EventList.read(data_dir, "hea", additional_columns=['DET_ID']) # Load eventlist from file
     eventlist = eventlist.filter_energy_range(energy_range)
     
     print("Loaded Event List")
@@ -170,18 +201,19 @@ def avg_periodogram_wrapper(data_dir, seg_size, energy_range=[3, 10], plot=True)
     avg_pow, xf = make_avg_periodogram(split_counts, split_times)
 
     if plot:
+        fig_p, ax_p = plt.subplots()
+
         avg_pow = avg_pow[xf>0]
         xf = xf[xf>0]
 
-        plt.plot(xf, avg_pow * xf, drawstyle="steps-mid", color="k", alpha=.5, ls='-.')
+        ax_p.plot(xf, avg_pow * xf, drawstyle="steps-mid", color="k", alpha=.5, ls='-.')
 
-        plt.yscale('log')
-        plt.xscale('log')
-        plt.show()
-
-
-def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], plot=True):
-    eventlist = st.EventList.read(data_dir, "hea") # Load eventlist from file
+        ax_p.set_yscale('log')
+        ax_p.set_xscale('log')
+        
+def Load_Dat_Stingray(file_dir, energy_range, dt):
+    # Load data
+    eventlist = st.EventList.read(file_dir, "hea") # Load eventlist from file
     eventlist = eventlist.filter_energy_range(energy_range)
     print("Loaded Event List")
 
@@ -189,14 +221,43 @@ def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], plot=True):
     print("Converted to LC")
     lc_gtis = lc_full.split_by_gti()
 
+    return lc_gtis
+
+def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], dt = 1/512, plot=True, min_freq=0.01, max_freq=10, bicoherence=False):
+    
+    # Load data
+    # eventlist = st.EventList.read(data_dir, "hea") # Load eventlist from file
+    # eventlist = eventlist.filter_energy_range(energy_range)
+    # print("Loaded Event List")
+
+    # lc_full = eventlist.to_lc(dt=1/512)
+    # print("Converted to LC")
+    # lc_gtis = lc_full.split_by_gti()
+
+    lc_gtis = Load_Dat_Stingray(data_dir, energy_range, dt)
+
     split_counts, split_times, n_stacked = split_multiple_lc(lc_gtis, segment_size=seg_size)
 
-    avg_bspec, freq = avg_bispec(split_counts, split_times)
-    bispec_abs = np.abs(avg_bspec)
+    if not bicoherence:
+        avg_bspec, freq = avg_bispec(split_counts, split_times, min_freq=min_freq, max_freq=max_freq, bicoherence=bicoherence)
+        bispec_abs = np.abs(avg_bspec)
+        bispec_phase = np.arctan2(avg_bspec.imag, avg_bspec.real)
+    else:
+        bispec_abs, freq = avg_bispec(split_counts, split_times, min_freq=min_freq, max_freq=max_freq, bicoherence=bicoherence)
+    # np.arg
     if plot:
+       
         fig, ax = plt.subplots()
-        cs = ax.pcolor(freq, freq, bispec_abs,vmin=1e4, norm='log', cmap='plasma')
+        cs = ax.pcolor(freq, freq, bispec_abs, norm='log', cmap='cividis')
         ax.set_xlabel('Frequency (Hz)')
         ax.set_ylabel('Frequency (Hz)')
         fig.colorbar(cs)
+        # plt.show()
+        if not bicoherence:
+            fig2, ax2 = plt.subplots()
+            cs = ax2.pcolor(freq, freq, bispec_phase, cmap='cividis')
+            ax2.set_xlabel('Frequency (Hz)')
+            ax2.set_ylabel('Frequency (Hz)')
+            fig2.colorbar(cs)
+        
         plt.show()
