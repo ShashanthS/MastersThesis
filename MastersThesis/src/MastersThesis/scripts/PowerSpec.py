@@ -8,7 +8,7 @@ import scipy as sc
 from stingray import AveragedPowerspectrum, AveragedCrossspectrum, EventList
 from matplotlib import cm, ticker
 from astropy.io import fits
-
+import lmfit
 import scipy.stats as scst
 
 from General import *
@@ -110,5 +110,73 @@ def avg_periodogram_wrapper(data_dir, seg_size, energy_range=[3, 10], plot=True,
         ax_p.set_ylabel('Power (Units)')
         plt.show()
     
-    return rebinned_pow, rebinned_freq, total_stacked
+    return rebinned_freq, rebinned_pow, total_stacked
+
+
+## Fitting Functions
+
+def obj_fcn(params, data_x, data_y, model, n_stacked):
+    """
+    Log likelihood function to be used for fitting.
+    
+    """
+    # m = PDS_reb.m # Number of stacked periodograms
+    # data_x = xdat 
+    # data_y = ydat
+    model_y = model.eval(params=params, x=data_x)
+    
+    S = 2 * np.sum(n_stacked * (data_y/model_y + np.log(model_y) + (1/n_stacked - 1) * np.log(data_x) + 100*n_stacked))
+    
+    # print(S)
+
+    return S
+
+
+def fit_powerspec(data_x, data_y, plot_fit=True, save_name=None):
+    # Define a Model:
+    full_model = lmfit.models.LorentzianModel(prefix='fund_') + lmfit.models.LorentzianModel(prefix='harm_') + lmfit.models.LorentzianModel(prefix='Bbn1_') + lmfit.models.LorentzianModel(prefix='Bbn2_') + lmfit.models.ConstantModel(prefix='poisson_')
+
+    # Add Params
+    params=lmfit.Parameters()
+
+    params.add('fund_amplitude', value=0.01, min=0)
+    params.add('fund_center', value=2.13, min=0)
+    params.add('fund_sigma', value=0.1, min=0)
+
+    params.add('harm_center', expr='2.0*fund_center')
+    params.add('harm_amplitude', value=0.003, min=0)
+    params.add('harm_sigma', value=0.3, min=0)
+
+    params.add('Bbn1_amplitude', value=0.01, min=0)
+    params.add('Bbn1_center', value=.3, min=0)
+    params.add('Bbn1_sigma', value=0.5, min=0)
+
+    params.add('Bbn2_amplitude', value=0.01, min=0)
+    params.add('Bbn2_center', value=0, min=0)
+    params.add('Bbn2_sigma', value=10, min=0)
+
+    params.add('poisson_c', value=0.1, min=0)
+
+    result = lmfit.minimize(obj_fcn, params, method='nelder', nan_policy='raise', calc_covar=True, args=(data_x, data_y, full_model, 1))
+
+    # print(result)
+
+    if plot_fit:
+        fig_powspec, ax_powspec = plt.subplots()
+        for mod in full_model.components:
+            model_pow = mod.eval(result.params, x=data_x)
+            ax_powspec.plot(data_x, model_pow* data_x, linestyle='dashed', label=mod.name)
+        
+        model_pow = full_model.eval(result.params, x=data_x)   
+        ax_powspec.plot(data_x, model_pow * data_x, linestyle='dashed', label='Full Model')
+        ax_powspec.plot(data_x, data_y * data_x, drawstyle="steps-mid", color="k", alpha=.5, ls='-.', label='Data')
+        
+        ax_powspec.set_xscale('log')
+        ax_powspec.set_yscale('log')
+        fig_powspec.legend()
+
+        if save_name is not None:
+             fig_powspec.savefig(f'{save_name}_powerspecfit.png')
+    
+    return result
 
