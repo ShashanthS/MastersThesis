@@ -84,24 +84,14 @@ def avg_bispec(lc_counts_list, lc_times_list, dt=1/512, min_freq=0.01, max_freq=
     else:
         avg_bispec = avg_bispec / len(counts)
     
-    
-
     return avg_bispec, freq_selected
     
-def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], dt = 1/512, plot=True, min_freq=0.01, max_freq=10, bicoherence=False, savefig=None):
-    
-    # Load data
-    # eventlist = st.EventList.read(data_dir, "hea") # Load eventlist from file
-    # eventlist = eventlist.filter_energy_range(energy_range)
-    # print("Loaded Event List")
+def avg_bispec_wrapper(data_dir=None, seg_size=None, lc_gtis=None, split_counts = None, split_times=None, energy_range=[3, 10], dt = 1/512, plot=True, min_freq=0.01, max_freq=10, bicoherence=False, savefig=None):
+    if lc_gtis is None:
+        lc_gtis = Load_Dat_Stingray(data_dir, energy_range, dt)
 
-    # lc_full = eventlist.to_lc(dt=1/512)
-    # print("Converted to LC")
-    # lc_gtis = lc_full.split_by_gti()
-
-    lc_gtis = Load_Dat_Stingray(data_dir, energy_range, dt)
-
-    split_counts, split_times, n_stacked = split_multiple_lc(lc_gtis, segment_size=seg_size)
+    if split_counts is None or split_times is None:
+        split_counts, split_times, n_stacked = split_multiple_lc(lc_gtis, segment_size=seg_size)
 
     if not bicoherence:
         avg_bspec, freq = avg_bispec(split_counts, split_times, min_freq=min_freq, max_freq=max_freq, bicoherence=bicoherence)
@@ -109,9 +99,8 @@ def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], dt = 1/512, plo
         bispec_phase = np.arctan2(avg_bspec.imag, avg_bspec.real)
     else:
         bispec_abs, freq = avg_bispec(split_counts, split_times, min_freq=min_freq, max_freq=max_freq, bicoherence=bicoherence)
-    # np.arg
-    if plot:
-       
+    
+    if plot:   
         fig, ax = plt.subplots()
         cs = ax.pcolor(freq, freq, bispec_abs, norm='log', cmap='cividis')
         ax.set_xlabel('Frequency (Hz)')
@@ -121,7 +110,7 @@ def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], dt = 1/512, plo
 
         if savefig != None:
             fig.savefig(f'{savefig}_abs.png')
-        # plt.show()
+        
         if not bicoherence:
             fig2, ax2 = plt.subplots()
             cs = ax2.pcolor(freq, freq, bispec_phase, cmap='cividis')
@@ -129,10 +118,10 @@ def avg_bispec_wrapper(data_dir, seg_size, energy_range=[3, 10], dt = 1/512, plo
             ax2.set_ylabel('Frequency (Hz)')
             fig2.colorbar(cs)
             ax2.set_title('Phase')
+            
             if savefig != None:
                 fig2.savefig(f'{savefig}_phase.png')
         
-        # plt.show()
     return freq, bispec_abs
 
 
@@ -178,9 +167,6 @@ def gen_bispectra_bootstrapping(lc_counts_list, dt=1/512, min_freq=0.01, max_fre
     if bicoherence:
         print("You should not be here!")
         pass
-
-    # else:
-    #     avg_bispec = avg_bispec / len(counts)
     
     bispec_arr = np.asanyarray(bispec_list)
 
@@ -205,8 +191,6 @@ def sample_bispec(bispec_arr, n_samples=None):
         n_samples = len(bispec_arr)
     sampled_indices = np.random.choice(len(bispec_arr), n_samples)
     sample = bispec_arr[sampled_indices]
-
-
 
     return sample
 

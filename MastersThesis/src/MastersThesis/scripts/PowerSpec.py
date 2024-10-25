@@ -132,30 +132,33 @@ def obj_fcn(params, data_x, data_y, model, n_stacked):
     return S
 
 
-def fit_powerspec(data_x, data_y, plot_fit=True, save_name=None):
+def fit_powerspec(data_x, data_y, plot_fit=True, save_name=None, model=None, params=None):
     # Define a Model:
-    full_model = lmfit.models.LorentzianModel(prefix='fund_') + lmfit.models.LorentzianModel(prefix='harm_') + lmfit.models.LorentzianModel(prefix='Bbn1_') + lmfit.models.LorentzianModel(prefix='Bbn2_') + lmfit.models.ConstantModel(prefix='poisson_')
-
+    if model is None:
+        full_model = lmfit.models.LorentzianModel(prefix='fund_') + lmfit.models.LorentzianModel(prefix='harm_') + lmfit.models.LorentzianModel(prefix='Bbn1_') + lmfit.models.LorentzianModel(prefix='Bbn2_') + lmfit.models.ConstantModel(prefix='poisson_')
+    else:
+         full_model = model
+    if params is None:
     # Add Params
-    params=lmfit.Parameters()
+        params=lmfit.Parameters()
 
-    params.add('fund_amplitude', value=0.01, min=0)
-    params.add('fund_center', value=2.13, min=0)
-    params.add('fund_sigma', value=0.1, min=0)
+        params.add('fund_amplitude', value=0.01, min=0)
+        params.add('fund_center', value=4.4, min=0)
+        params.add('fund_sigma', value=1, min=0)
 
-    params.add('harm_center', expr='2.0*fund_center')
-    params.add('harm_amplitude', value=0.003, min=0)
-    params.add('harm_sigma', value=0.3, min=0)
+        params.add('harm_center', expr='2.0*fund_center')
+        params.add('harm_amplitude', value=0.003, min=0)
+        params.add('harm_sigma', value=1, min=0)
 
-    params.add('Bbn1_amplitude', value=0.01, min=0)
-    params.add('Bbn1_center', value=.3, min=0)
-    params.add('Bbn1_sigma', value=0.5, min=0)
+        params.add('Bbn1_amplitude', value=0.01, min=0)
+        params.add('Bbn1_center', value=.3, min=0)
+        params.add('Bbn1_sigma', value=0.5, min=0)
 
-    params.add('Bbn2_amplitude', value=0.01, min=0)
-    params.add('Bbn2_center', value=0, min=0)
-    params.add('Bbn2_sigma', value=10, min=0)
+        params.add('Bbn2_amplitude', value=0.01, min=0)
+        params.add('Bbn2_center', value=0, min=0)
+        params.add('Bbn2_sigma', value=10, min=0)
 
-    params.add('poisson_c', value=0.1, min=0)
+        params.add('poisson_c', value=0.1, min=0)
 
     result = lmfit.minimize(obj_fcn, params, method='nelder', nan_policy='raise', calc_covar=True, args=(data_x, data_y, full_model, 1))
 
@@ -180,3 +183,19 @@ def fit_powerspec(data_x, data_y, plot_fit=True, save_name=None):
     
     return result
 
+def plot_model_dat(data_x, data_y, full_model, params, save_name=False):
+    fig_powspec, ax_powspec = plt.subplots()
+    for mod in full_model.components:
+        model_pow = mod.eval(params, x=data_x)
+        ax_powspec.plot(data_x, model_pow* data_x, linestyle='dashed', label=mod.name)
+    
+    model_pow = full_model.eval(params, x=data_x)   
+    ax_powspec.plot(data_x, model_pow * data_x, linestyle='dashed', label='Full Model')
+    ax_powspec.plot(data_x, data_y * data_x, drawstyle="steps-mid", color="k", alpha=.5, ls='-.', label='Data')
+    
+    ax_powspec.set_xscale('log')
+    ax_powspec.set_yscale('log')
+    fig_powspec.legend()
+
+    if save_name is not None:
+            fig_powspec.savefig(f'{save_name}_powerspecfit.png')
